@@ -21,6 +21,32 @@ local AI_REACT_DIST  = WINDOW_WIDTH * 0.5    -- 공이 이 거리 안에 들어�
 local TRAIL_LENGTH   = 15                    -- 공 잔상 프레임 수
 local PARTICLE_BURST = 20                    -- 패들 충돌 시 한 번에 분사할 파티클 수
 
+-- 랜덤 박스(파워업)
+local POWERUP_SIZE       = 24
+local POWERUP_SPEED      = 240
+local POWERUP_SWITCH     = 1.0    -- 박스의 기능이 바뀌는 주기(초)
+local POWERUP_SPAWN_MIN  = 3.0    -- 다음 박스 생성까지 대기 최소(초)
+local POWERUP_SPAWN_MAX  = 6.0    -- 다음 박스 생성까지 대기 최대(초)
+local EFFECT_DURATION    = 5.0    -- 효과 지속 시간(초)
+local PADDLE_GROW_MULT   = 1.5
+local PADDLE_SHRINK_MULT = 0.6
+local BALL_FAST_MULT     = 1.4
+local BALL_SLOW_MULT     = 0.6
+
+local POWERUP_KINDS  = { "grow", "shrink", "fast", "slow" }
+local POWERUP_COLORS = {
+    grow   = { 0.30, 0.85, 0.45 },
+    shrink = { 0.95, 0.40, 0.40 },
+    fast   = { 1.00, 0.70, 0.20 },
+    slow   = { 0.45, 0.75, 1.00 },
+}
+local POWERUP_LABELS = {
+    grow   = "+",
+    shrink = "-",
+    fast   = ">>",
+    slow   = "<<",
+}
+
 local player1, player2, ball
 local gameState   -- "start" | "play" | "done"
 local gameMode    -- "1p" | "2p"
@@ -29,6 +55,10 @@ local fontTitle, fontScore, fontSmall
 local hitSound
 local hitParticles
 local ballTrail
+local powerup            -- 활성 박스(없으면 nil)
+local powerupSpawnTimer  -- 다음 박스 등장까지 남은 시간
+local ballSpeedMult      -- 공 속도에 적용된 현재 배율
+local ballSpeedTimer     -- 공 속도 효과 잔여 시간
 
 ----------------------------------------------------------
 -- 초기화
@@ -72,13 +102,21 @@ function resetGame()
     player1 = {
         x = PADDLE_MARGIN,
         y = WINDOW_HEIGHT / 2 - PADDLE_HEIGHT / 2,
+        h = PADDLE_HEIGHT,
         score = 0,
+        effectTimer = 0,
     }
     player2 = {
         x = WINDOW_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH,
         y = WINDOW_HEIGHT / 2 - PADDLE_HEIGHT / 2,
+        h = PADDLE_HEIGHT,
         score = 0,
+        effectTimer = 0,
     }
+    powerup = nil
+    powerupSpawnTimer = love.math.random() * (POWERUP_SPAWN_MAX - POWERUP_SPAWN_MIN) + POWERUP_SPAWN_MIN
+    ballSpeedMult = 1
+    ballSpeedTimer = 0
     resetBall()
     winner = nil
 end
@@ -91,6 +129,9 @@ function resetBall()
         dy = love.math.random(-120, 120),
     }
     ballTrail = {}
+    -- 공이 새로 나오므로 속도 효과는 리셋(패들 효과는 유지)
+    ballSpeedMult = 1
+    ballSpeedTimer = 0
 end
 
 ----------------------------------------------------------
@@ -99,8 +140,75 @@ end
 local function collides(b, p)
     return b.x < p.x + PADDLE_WIDTH
        and b.x + BALL_SIZE > p.x
-       and b.y < p.y + PADDLE_HEIGHT
+       and b.y < p.y + p.h
        and b.y + BALL_SIZE > p.y
+end
+
+----------------------------------------------------------
+-- 파워업 처리
+----------------------------------------------------------
+local function setBallSpeedMult(newMult)
+    if ball then
+        ball.dx = ball.dx / ballSpeedMult * newMult
+        ball.dy = ball.dy / ballSpeedMult * newMult
+    end
+    ballSpeedMult = newMult
+end
+
+local function restorePaddle(p)
+    local oldH = p.h
+    p.h = PADDLE_HEIGHT
+    p.y = p.y + (oldH - p.h) / 2
+    p.y = math.max(0, math.min(WINDOW_HEIGHT - p.h, p.y))
+    p.effectTimer = 0
+end
+
+local function setPaddleScale(p, mult)
+    if p.effectTimer > 0 then restorePaddle(p) end
+    local oldH = p.h
+    p.h = PADDLE_HEIGHT * mult
+    p.y = p.y + (oldH - p.h) / 2
+    p.y = math.max(0, math.min(WINDOW_HEIGHT - p.h, p.y))
+    p.effectTimer = EFFECT_DURATION
+end
+
+local function applyPowerup(kind, paddle)
+    if kind == "grow" then
+        setPaddleScale(paddle, PADDLE_GROW_MULT)
+    elseif kind == "shrink" then
+        setPaddleScale(paddle, PADDLE_SHRINK_MULT)
+    elseif kind == "fast" then
+        setBallSpeedMult(BALL_FAST_MULT)
+        ballSpeedTimer = EFFECT_DURATION
+    elseif kind == "slow" then
+        setBallSpeedMult(BALL_SLOW_MULT)
+        ballSpeedTimer = EFFECT_DURATION
+    end
+end
+
+local function scheduleNextPowerup()
+    powerupSpawnTimer = love.math.random() * (POWERUP_SPAWN_MAX - POWERUP_SPAWN_MIN) + POWERUP_SPAWN_MIN
+end
+
+local function spawnPowerup()
+    local cx = WINDOW_WIDTH / 2
+    local x  = cx - POWERUP_SIZE / 2 + love.math.random(-60, 60)
+    local margin = 50
+    local y  = love.math.random(margin, WINDOW_HEIGHT - margin - POWERUP_SIZE)
+    local dir = (love.math.random(0, 1) == 0) and -1 or 1
+    powerup = {
+        x = x, y = y,
+        dx = dir * POWERUP_SPEED,
+        kind = POWERUP_KINDS[love.math.random(#POWERUP_KINDS)],
+        switchTimer = POWERUP_SWITCH,
+    }
+end
+
+local function powerupHitsPaddle(pu, paddle)
+    return pu.x < paddle.x + PADDLE_WIDTH
+       and pu.x + POWERUP_SIZE > paddle.x
+       and pu.y < paddle.y + paddle.h
+       and pu.y + POWERUP_SIZE > paddle.y
 end
 
 ----------------------------------------------------------
@@ -109,7 +217,7 @@ end
 --   - 멀어질 땐 중앙으로 천천히 복귀
 ----------------------------------------------------------
 local function updateAI(dt)
-    local paddleCenter = player2.y + PADDLE_HEIGHT / 2
+    local paddleCenter = player2.y + player2.h / 2
     local targetY
 
     local ballMovingToAI = ball.dx > 0
@@ -125,7 +233,7 @@ local function updateAI(dt)
     if math.abs(diff) > AI_DEADZONE then
         local dir = diff > 0 and 1 or -1
         player2.y = player2.y + dir * AI_SPEED * dt
-        player2.y = math.max(0, math.min(WINDOW_HEIGHT - PADDLE_HEIGHT, player2.y))
+        player2.y = math.max(0, math.min(WINDOW_HEIGHT - player2.h, player2.y))
     end
 end
 
@@ -140,7 +248,7 @@ function love.update(dt)
     if love.keyboard.isDown("w") then
         player1.y = math.max(0, player1.y - PADDLE_SPEED * dt)
     elseif love.keyboard.isDown("s") then
-        player1.y = math.min(WINDOW_HEIGHT - PADDLE_HEIGHT, player1.y + PADDLE_SPEED * dt)
+        player1.y = math.min(WINDOW_HEIGHT - player1.h, player1.y + PADDLE_SPEED * dt)
     end
 
     -- P2 조작 (사람 또는 AI)
@@ -148,10 +256,49 @@ function love.update(dt)
         if love.keyboard.isDown("up") then
             player2.y = math.max(0, player2.y - PADDLE_SPEED * dt)
         elseif love.keyboard.isDown("down") then
-            player2.y = math.min(WINDOW_HEIGHT - PADDLE_HEIGHT, player2.y + PADDLE_SPEED * dt)
+            player2.y = math.min(WINDOW_HEIGHT - player2.h, player2.y + PADDLE_SPEED * dt)
         end
     else
         updateAI(dt)
+    end
+
+    -- 파워업: 스폰 / 이동 / 종류 회전 / 패들 충돌
+    if not powerup then
+        powerupSpawnTimer = powerupSpawnTimer - dt
+        if powerupSpawnTimer <= 0 then spawnPowerup() end
+    else
+        powerup.x = powerup.x + powerup.dx * dt
+        powerup.switchTimer = powerup.switchTimer - dt
+        if powerup.switchTimer <= 0 then
+            powerup.kind = POWERUP_KINDS[love.math.random(#POWERUP_KINDS)]
+            powerup.switchTimer = POWERUP_SWITCH
+        end
+        if powerup.x + POWERUP_SIZE < 0 or powerup.x > WINDOW_WIDTH then
+            powerup = nil
+            scheduleNextPowerup()
+        elseif powerupHitsPaddle(powerup, player1) then
+            applyPowerup(powerup.kind, player1)
+            powerup = nil
+            scheduleNextPowerup()
+        elseif powerupHitsPaddle(powerup, player2) then
+            applyPowerup(powerup.kind, player2)
+            powerup = nil
+            scheduleNextPowerup()
+        end
+    end
+
+    -- 효과 타이머
+    if player1.effectTimer > 0 then
+        player1.effectTimer = player1.effectTimer - dt
+        if player1.effectTimer <= 0 then restorePaddle(player1) end
+    end
+    if player2.effectTimer > 0 then
+        player2.effectTimer = player2.effectTimer - dt
+        if player2.effectTimer <= 0 then restorePaddle(player2) end
+    end
+    if ballSpeedTimer > 0 then
+        ballSpeedTimer = ballSpeedTimer - dt
+        if ballSpeedTimer <= 0 then setBallSpeedMult(1) end
     end
 
     -- 공 이동
@@ -180,13 +327,13 @@ function love.update(dt)
     if collides(ball, player1) then
         ball.x = player1.x + PADDLE_WIDTH
         ball.dx = math.abs(ball.dx) * SPEED_UP
-        local offset = (ball.y + BALL_SIZE / 2) - (player1.y + PADDLE_HEIGHT / 2)
+        local offset = (ball.y + BALL_SIZE / 2) - (player1.y + player1.h / 2)
         ball.dy = offset * 6
         hitPaddle = true
     elseif collides(ball, player2) then
         ball.x = player2.x - BALL_SIZE
         ball.dx = -math.abs(ball.dx) * SPEED_UP
-        local offset = (ball.y + BALL_SIZE / 2) - (player2.y + PADDLE_HEIGHT / 2)
+        local offset = (ball.y + BALL_SIZE / 2) - (player2.y + player2.h / 2)
         ball.dy = offset * 6
         hitPaddle = true
     end
@@ -239,9 +386,21 @@ function love.draw()
 
     -- 패들 & 공
     love.graphics.setColor(1, 1, 1)
-    love.graphics.rectangle("fill", player1.x, player1.y, PADDLE_WIDTH, PADDLE_HEIGHT)
-    love.graphics.rectangle("fill", player2.x, player2.y, PADDLE_WIDTH, PADDLE_HEIGHT)
+    love.graphics.rectangle("fill", player1.x, player1.y, PADDLE_WIDTH, player1.h)
+    love.graphics.rectangle("fill", player2.x, player2.y, PADDLE_WIDTH, player2.h)
     love.graphics.circle("fill", ball.x + ballRadius, ball.y + ballRadius, ballRadius)
+
+    -- 파워업 박스
+    if powerup then
+        local c = POWERUP_COLORS[powerup.kind]
+        love.graphics.setColor(c[1], c[2], c[3], 1)
+        love.graphics.rectangle("fill", powerup.x, powerup.y, POWERUP_SIZE, POWERUP_SIZE, 4, 4)
+        love.graphics.setColor(0, 0, 0, 0.55)
+        love.graphics.rectangle("line", powerup.x, powerup.y, POWERUP_SIZE, POWERUP_SIZE, 4, 4)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.setFont(fontSmall)
+        love.graphics.printf(POWERUP_LABELS[powerup.kind], powerup.x, powerup.y + 1, POWERUP_SIZE, "center")
+    end
 
     -- 충돌 파티클
     if hitParticles then
