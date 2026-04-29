@@ -5,6 +5,7 @@ LÖVE2D로 만든 단일 파일 Pong 게임. 모든 로직은 [main.lua](main.lu
 ## 실행
 - LÖVE2D 11.x 설치 후 `run.bat` 실행 (또는 프로젝트 루트에서 `love .`).
 - `hit.wav`가 프로젝트 루트에 있으면 효과음이 재생되고, 없으면 무음으로 진행합니다.
+- `intro.png`가 프로젝트 루트에 있으면 인트로 화면이 표시되고, 없으면 곧바로 시작 화면으로 진입합니다.
 
 ## 조작
 | 상황 | 키 | 동작 |
@@ -24,6 +25,121 @@ LÖVE2D로 만든 단일 파일 Pong 게임. 모든 로직은 [main.lua](main.lu
 - `gameState`: `"start"` | `"play"` | `"done"`
 - `gameMode`: `"1p"` | `"2p"`
 - 시작 화면에서 모드를 골라야 플레이로 진입.
+- 프로그램 시작 시 `introState`(`"hold"` → `"split"` → `nil`)가 시작 화면 위에 오버레이로 진행. 인트로가 끝나면(또는 스킵되면) `gameState = "start"`가 그대로 노출됨.
+
+## 인트로 화면
+참조 위치: [main.lua:25-26](main.lua:25) 상수, [main.lua:66-70](main.lua:66) 상태 변수, [main.lua:99-108](main.lua:99) 로드, [main.lua:263-273](main.lua:263) 단계 진행, [main.lua:473-487](main.lua:473) 렌더, [main.lua:499-502](main.lua:499) 스킵.
+
+### 동작 흐름
+프로그램 시작 → `"hold"`(1초 정지) → `"split"`(0.5초 좌우 분할) → 시작 화면(`gameState == "start"`).
+어느 단계에서든 `Esc`를 제외한 키 입력으로 즉시 시작 화면으로 점프 가능.
+
+```
+love.load
+  ├─ gameState   := "start"   (백그라운드로 미리 준비)
+  └─ introState  := "hold"    (오버레이 활성)
+                ↓ 1.0s
+              "split"
+                ↓ 0.5s        (또는 키 입력 시 즉시)
+                nil           (오버레이 종료, 시작 화면이 그대로 드러남)
+```
+
+### 상수 / 상태 변수
+- 상수 [main.lua:25-26](main.lua:25)
+  - `INTRO_HOLD = 1.0` — 인트로 이미지가 정지해 있는 시간(초).
+  - `INTRO_SPLIT = 0.5` — 좌우 분할 애니메이션 길이(초).
+- 상태 변수 [main.lua:66-70](main.lua:66)
+  - `introImage` — 로드된 `Image` 객체. 로드 실패 시 `nil`이며 인트로는 통째로 비활성.
+  - `introQuadLeft` / `introQuadRight` — 이미지 좌/우 절반을 가리키는 `Quad`. `love.graphics.draw`에 함께 넘기면 해당 Quad가 정의한 픽셀 영역만 잘라서 렌더.
+  - `introState` — `nil` | `"hold"` | `"split"`. `nil`이 정상(인트로 비활성) 상태이고, 그 외 값일 때만 오버레이가 그려지고 게임 업데이트가 정지.
+  - `introTimer` — 현재 단계로 진입한 뒤 누적된 시간(초). 단계 전환 시 0으로 리셋.
+
+### 로드 ([main.lua:99-108](main.lua:99))
+```lua
+local okImg, img = pcall(love.graphics.newImage, "intro.png")
+if okImg then
+    introImage = img
+    local iw, ih = img:getDimensions()
+    introQuadLeft  = love.graphics.newQuad(0,      0, iw / 2, ih, iw, ih)
+    introQuadRight = love.graphics.newQuad(iw / 2, 0, iw / 2, ih, iw, ih)
+    introState = "hold"
+    introTimer = 0
+end
+```
+- `pcall`로 감싸서 파일 부재/디코딩 실패에도 게임이 죽지 않도록 함 (`hit.wav`와 동일한 방어 패턴).
+- `Quad`는 원본 이미지의 픽셀 좌표·크기를 받음 (`x, y, w, h, sw, sh`). 좌측 절반은 `(0, 0, iw/2, ih)`, 우측 절반은 `(iw/2, 0, iw/2, ih)`. Quad 자체엔 화면 좌표 개념이 없고, 그릴 때 받는 `x, y` 위치와 `sx, sy` 스케일에 따라 화면에 매핑됨.
+- 이미지 로드 실패 시 `introState`는 `nil`로 남아 [main.lua:264](main.lua:264)/[main.lua:474](main.lua:474) 분기를 모두 건너뛰므로 별도의 게임 분기가 필요 없음.
+
+### 단계 진행 ([main.lua:263-273](main.lua:263))
+```lua
+function love.update(dt)
+    if introState then
+        introTimer = introTimer + dt
+        if introState == "hold" and introTimer >= INTRO_HOLD then
+            introState = "split"
+            introTimer = 0
+        elseif introState == "split" and introTimer >= INTRO_SPLIT then
+            introState = nil
+        end
+        return  -- 인트로 동안 게임 로직 정지
+    end
+    ...
+end
+```
+- 인트로가 활성인 동안 함수 최상단에서 `return`하므로 **파티클 업데이트, 공 이동, 파워업 타이머, 효과 타이머가 모두 정지**. 이렇게 해야 인트로가 끝났을 때 시작 화면이 처음 상태 그대로 드러남.
+- 단계 전환 시 `introTimer`를 0으로 리셋해 다음 단계의 0~`duration` 진행도를 다시 측정.
+
+### 렌더 ([main.lua:473-487](main.lua:473))
+```lua
+if introState and introImage then
+    local iw, ih = introImage:getDimensions()
+    local sx = WINDOW_WIDTH / iw
+    local sy = WINDOW_HEIGHT / ih
+    love.graphics.setColor(1, 1, 1, 1)
+    if introState == "hold" then
+        love.graphics.draw(introImage, 0, 0, 0, sx, sy)
+    else
+        local progress = math.min(introTimer / INTRO_SPLIT, 1)
+        local offset = progress * (WINDOW_WIDTH / 2)
+        love.graphics.draw(introImage, introQuadLeft,  -offset,                   0, 0, sx, sy)
+        love.graphics.draw(introImage, introQuadRight, WINDOW_WIDTH / 2 + offset, 0, 0, sx, sy)
+    end
+end
+```
+- 렌더 순서가 결정적: `love.draw` 본문은 평소대로 `gameState == "start"` 분기를 그려 **시작 화면(타이틀 PONG, 모드 안내 텍스트, 가운데 점선)을 먼저 그림**. 그 위에 인트로 오버레이가 덮이고, 분할이 진행될수록 시작 화면이 갈라진 틈으로 드러남.
+- 스케일링: 이미지 원본 비율과 무관하게 윈도우(800×600)에 꽉 차도록 `sx, sy`를 따로 계산해 stretch. 비율이 다른 이미지를 넣으면 가로/세로가 늘어날 수 있음 (의도된 단순화).
+- 분할 수식:
+  - `progress = introTimer / INTRO_SPLIT`(0→1, `math.min`으로 1 클램프).
+  - `offset = progress * (WINDOW_WIDTH / 2)`.
+  - 왼쪽 반: `(x = -offset, 0)` → progress=0일 때 (0, 0)~(400, 600), progress=1일 때 (-400, 0)~(0, 600). 화면 왼쪽 바깥으로 빠짐.
+  - 오른쪽 반: `(x = WINDOW_WIDTH/2 + offset, 0)` → progress=0일 때 (400, 0)~(800, 600), progress=1일 때 (800, 0)~(1200, 600). 화면 오른쪽 바깥으로 빠짐.
+  - 이미지가 화면 바깥으로 나가는 부분은 LÖVE가 자동으로 클리핑.
+- `setColor(1, 1, 1, 1)`로 알파 1을 명시 — 직전에 다른 그리기에서 색이 변경되어 있어도 인트로 이미지가 의도한 색으로 그려지도록 보장.
+
+### 스킵 ([main.lua:499-502](main.lua:499))
+```lua
+function love.keypressed(key)
+    if key == "escape" then
+        love.event.quit()
+        return
+    end
+
+    if introState then
+        introState = nil
+        return
+    end
+    ...
+end
+```
+- `Esc`는 기존대로 종료(인트로보다 먼저 처리).
+- 그 외 어떤 키든 인트로 진행 중이면 `introState`를 `nil`로 만들어 즉시 종료. 단계가 무엇이든(`"hold"`/`"split"`) 동일하게 작동.
+- `introState`만 끄고 그 입력은 그대로 소비(`return`)하므로, 스킵에 사용한 키가 시작 화면 입력(예: `1`/`2`)으로 곧바로 흘러가 모드를 시작해 버리는 일은 없음.
+
+### 결정 사항과 그 이유
+- **시작 화면을 백그라운드로 미리 그리는 방식**을 택한 이유: 분할 애니메이션 끝 프레임에서 시작 화면으로 전환할 때 한 프레임의 검은 화면이 보이지 않게 하기 위함. 별도 트랜지션 상태를 두는 대신 `gameState == "start"`를 처음부터 활성화해 두고 위에 오버레이만 띄우는 단순한 구조.
+- **Quad + scale 방식**: `setScissor`로 클립 영역을 만드는 방법도 있지만, Quad는 좌/우 두 번의 `draw` 호출만으로 동일한 효과를 내고 좌표 계산도 직관적이라 선택.
+- **인트로 동안 게임 정지**: 인트로 도중에 파워업 타이머나 파티클이 흐르면 시작 화면이 드러나는 순간 부자연스러울 수 있어, 한 줄짜리 `return`으로 모든 게임 로직을 정지.
+- **`pcall` 로드**: `intro.png`를 선택 자산으로 취급해 사용자가 파일 없이도 게임을 실행할 수 있게 함 (`hit.wav`와 동일한 정책).
 
 ## AI (1P 모드 P2 조작)
 [main.lua:111](main.lua:111) `updateAI`.
@@ -67,11 +183,13 @@ LÖVE2D로 만든 단일 파일 Pong 게임. 모든 로직은 [main.lua](main.lu
 - AI: `AI_SPEED`, `AI_DEADZONE`, `AI_REACT_DIST`
 - 이펙트: `TRAIL_LENGTH`, `PARTICLE_BURST`
 - 파워업: `POWERUP_SIZE`, `POWERUP_SPEED`, `POWERUP_SWITCH`, `POWERUP_SPAWN_MIN/MAX`, `EFFECT_DURATION`, `PADDLE_GROW_MULT`, `PADDLE_SHRINK_MULT`, `BALL_FAST_MULT`, `BALL_SLOW_MULT`
+- 인트로: `INTRO_HOLD`, `INTRO_SPLIT`
 
 ## 파일
 - [main.lua](main.lua) — 전체 게임 로직 (단일 파일)
 - [run.bat](run.bat) — Windows 실행 스크립트
 - `hit.wav` — 효과음 (사용자가 직접 추가, 선택)
+- `intro.png` — 인트로 화면 이미지 (사용자가 직접 추가, 선택)
 
 ## 개선 사항
 - [x] 랜덤 박스
@@ -85,3 +203,6 @@ LÖVE2D로 만든 단일 파일 Pong 게임. 모든 로직은 [main.lua](main.lu
 	    - 공 속도 빠르게, 느리게
 	- 부딪친 랜덤 박스는 삭제
 	- 발현된 기능은 5초 후 초기화
+- [x] 인트로 화면
+	- 프로그램 로딩 시 인트로 화면(intro.png)이 보임
+	- 1초 뒤 인트로 화면 좌우가 갈리면서 플레이 화면이 보임

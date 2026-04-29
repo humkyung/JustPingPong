@@ -21,6 +21,10 @@ local AI_REACT_DIST  = WINDOW_WIDTH * 0.5    -- 공이 이 거리 안에 들어�
 local TRAIL_LENGTH   = 15                    -- 공 잔상 프레임 수
 local PARTICLE_BURST = 20                    -- 패들 충돌 시 한 번에 분사할 파티클 수
 
+-- 인트로
+local INTRO_HOLD     = 1.0    -- 인트로 정지 시간(초)
+local INTRO_SPLIT    = 0.5    -- 좌우 분할 애니메이션 길이(초)
+
 -- 랜덤 박스(파워업)
 local POWERUP_SIZE       = 24
 local POWERUP_SPEED      = 240
@@ -59,6 +63,11 @@ local powerup            -- 활성 박스(없으면 nil)
 local powerupSpawnTimer  -- 다음 박스 등장까지 남은 시간
 local ballSpeedMult      -- 공 속도에 적용된 현재 배율
 local ballSpeedTimer     -- 공 속도 효과 잔여 시간
+local introImage         -- 인트로 이미지 (없으면 nil)
+local introQuadLeft      -- 인트로 이미지 왼쪽 절반 Quad
+local introQuadRight     -- 인트로 이미지 오른쪽 절반 Quad
+local introState         -- nil | "hold" | "split"
+local introTimer         -- 현재 인트로 단계 경과 시간
 
 ----------------------------------------------------------
 -- 초기화
@@ -86,6 +95,17 @@ function love.load()
     hitParticles:setSpeed(80, 260)
     hitParticles:setSpread(math.pi * 2)
     hitParticles:setColors(1, 1, 1, 1, 1, 1, 1, 0)
+
+    -- 인트로 이미지 (없으면 인트로 스킵)
+    local okImg, img = pcall(love.graphics.newImage, "intro.png")
+    if okImg then
+        introImage = img
+        local iw, ih = img:getDimensions()
+        introQuadLeft  = love.graphics.newQuad(0,      0, iw / 2, ih, iw, ih)
+        introQuadRight = love.graphics.newQuad(iw / 2, 0, iw / 2, ih, iw, ih)
+        introState = "hold"
+        introTimer = 0
+    end
 
     resetGame()
     gameState = "start"
@@ -241,6 +261,17 @@ end
 -- 업데이트
 ----------------------------------------------------------
 function love.update(dt)
+    if introState then
+        introTimer = introTimer + dt
+        if introState == "hold" and introTimer >= INTRO_HOLD then
+            introState = "split"
+            introTimer = 0
+        elseif introState == "split" and introTimer >= INTRO_SPLIT then
+            introState = nil
+        end
+        return
+    end
+
     if hitParticles then hitParticles:update(dt) end
     if gameState ~= "play" then return end
 
@@ -438,6 +469,22 @@ function love.draw()
         love.graphics.setFont(fontSmall)
         love.graphics.printf("SPACE: rematch     M: menu", 0, WINDOW_HEIGHT / 2 + 10, WINDOW_WIDTH, "center")
     end
+
+    -- 인트로 오버레이
+    if introState and introImage then
+        local iw, ih = introImage:getDimensions()
+        local sx = WINDOW_WIDTH / iw
+        local sy = WINDOW_HEIGHT / ih
+        love.graphics.setColor(1, 1, 1, 1)
+        if introState == "hold" then
+            love.graphics.draw(introImage, 0, 0, 0, sx, sy)
+        else
+            local progress = math.min(introTimer / INTRO_SPLIT, 1)
+            local offset = progress * (WINDOW_WIDTH / 2)
+            love.graphics.draw(introImage, introQuadLeft,  -offset,                   0, 0, sx, sy)
+            love.graphics.draw(introImage, introQuadRight, WINDOW_WIDTH / 2 + offset, 0, 0, sx, sy)
+        end
+    end
 end
 
 ----------------------------------------------------------
@@ -446,6 +493,11 @@ end
 function love.keypressed(key)
     if key == "escape" then
         love.event.quit()
+        return
+    end
+
+    if introState then
+        introState = nil
         return
     end
 
