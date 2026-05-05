@@ -188,8 +188,33 @@ end
 ## 파일
 - [main.lua](main.lua) — 전체 게임 로직 (단일 파일)
 - [run.bat](run.bat) — Windows 실행 스크립트
+- [build.ps1](build.ps1) — `.exe` 배포 패키지 빌드 스크립트
 - `hit.wav` — 효과음 (사용자가 직접 추가, 선택)
 - `intro.png` — 인트로 화면 이미지 (사용자가 직접 추가, 선택)
+
+## 빌드 (.exe 패키징)
+[build.ps1](build.ps1) 실행으로 단독 실행형 Windows 배포본을 만든다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+### 출력물
+- `dist/JustPingPong/JustPingPong.exe` — `love.exe`와 `.love`(zip)을 바이너리 결합한 단일 실행 파일.
+- `dist/JustPingPong/*.dll`, `*.txt` — `C:\Program Files\LOVE`의 런타임 DLL과 라이선스. exe와 같은 폴더에 있어야 실행됨.
+- `dist/JustPingPong-win64.zip` — 위 폴더 전체를 압축한 배포용 zip.
+
+### 동작 단계
+1. `C:\Program Files\LOVE\love.exe`와 `main.lua` 존재 확인. 없으면 즉시 실패.
+2. 기존 `dist/` 정리 후 새로 생성.
+3. `main.lua` + `hit.wav` + `intro.png`(있는 것만)을 zip 루트에 넣어 `JustPingPong.love` 생성. `Compress-Archive` 대신 `System.IO.Compression.ZipFile` API를 직접 호출 — `Compress-Archive`는 소스 디렉터리 구조를 보존하므로 LÖVE가 요구하는 "zip 루트에 `main.lua`" 구조를 만들 수 없음.
+4. `love.exe` 바이트열 + `.love` 바이트열을 직접 이어 붙여(`copy /b`와 동일 결과) `JustPingPong.exe` 생성. 동일 폴더로 `*.dll`, `*.txt`(love.exe 제외) 복사.
+5. `Compress-Archive`로 폴더를 `JustPingPong-win64.zip`으로 압축.
+
+### 변경 포인트
+- **LÖVE 설치 경로**: `$LoveDir = "C:\Program Files\LOVE"`. 다른 위치에 설치되어 있으면 이 줄만 수정.
+- **포함 파일**: `$SourceFiles = @("main.lua", "hit.wav", "intro.png")`. 새 자산을 추가하면 이 배열에 등록.
+- 32bit/아이콘 변경/단일 파일 SFX는 미지원 — 필요 시 별도 작업.
 
 ## 개선 사항
 - [x] 랜덤 박스
