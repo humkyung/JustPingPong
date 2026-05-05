@@ -200,21 +200,40 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
 ### 출력물
-- `dist/JustPingPong/JustPingPong.exe` — `love.exe`와 `.love`(zip)을 바이너리 결합한 단일 실행 파일.
-- `dist/JustPingPong/*.dll`, `*.txt` — `C:\Program Files\LOVE`의 런타임 DLL과 라이선스. exe와 같은 폴더에 있어야 실행됨.
+- `dist/JustPingPong/JustPingPong.exe` — `love.exe`와 `.love`(zip)을 바이너리 결합한 실행 파일. 같은 폴더의 DLL이 필요.
+- `dist/JustPingPong/*.dll`, `*.txt` — `C:\Program Files\LOVE`의 런타임 DLL과 라이선스. 위 exe와 같은 폴더에 있어야 실행됨.
 - `dist/JustPingPong-win64.zip` — 위 폴더 전체를 압축한 배포용 zip.
+- `dist/JustPingPong-single.exe` — 위의 모든 DLL/txt를 Enigma Virtual Box로 가상 패킹한 **단일 실행 파일**. 별도 파일 없이 단독 배포·실행 가능.
+
+### 사전 요구
+- LÖVE 11.x: `C:\Program Files\LOVE\love.exe` (필수)
+- Enigma Virtual Box (단일 exe 생성용, 선택): `C:\Program Files (x86)\Enigma Virtual Box\enigmavbconsole.exe`. https://enigmaprotector.com/en/downloads.html 에서 무료 다운로드. 미설치 시 [6/6] 단계는 건너뛰고 폴더/zip만 생성.
 
 ### 동작 단계
-1. `C:\Program Files\LOVE\love.exe`와 `main.lua` 존재 확인. 없으면 즉시 실패.
+1. `love.exe`와 `main.lua` 존재 확인. 없으면 즉시 실패.
 2. 기존 `dist/` 정리 후 새로 생성.
 3. `main.lua` + `hit.wav` + `intro.png`(있는 것만)을 zip 루트에 넣어 `JustPingPong.love` 생성. `Compress-Archive` 대신 `System.IO.Compression.ZipFile` API를 직접 호출 — `Compress-Archive`는 소스 디렉터리 구조를 보존하므로 LÖVE가 요구하는 "zip 루트에 `main.lua`" 구조를 만들 수 없음.
 4. `love.exe` 바이트열 + `.love` 바이트열을 직접 이어 붙여(`copy /b`와 동일 결과) `JustPingPong.exe` 생성. 동일 폴더로 `*.dll`, `*.txt`(love.exe 제외) 복사.
 5. `Compress-Archive`로 폴더를 `JustPingPong-win64.zip`으로 압축.
+6. Enigma Virtual Box로 [4]의 exe와 [4]의 DLL/txt들을 결합하여 `dist/JustPingPong-single.exe` 단일 파일 생성. 일시적으로 `.evb` 프로젝트 파일을 동적 생성 → `enigmavbconsole.exe`로 처리 → `.evb` 삭제.
+
+### Enigma Virtual Box 패킹 ([6/6])
+- `.evb`는 Enigma 전용 XML 프로젝트 파일. 빌드 스크립트가 매번 새로 생성하므로 수동 편집 불필요.
+- 핵심 옵션:
+  - `<Type>3</Type>` — 폴더 노드. `%DEFAULT FOLDER%`(런타임에 exe와 동일 위치로 매핑되는 가상 폴더)에 모든 DLL/txt를 배치.
+  - `<Type>2</Type>` — 개별 파일 노드. `<Name>`은 가상 경로 내 파일명, `<File>`은 호스트 측 절대 경로(빌드 시점).
+  - `<CompressFiles>true</CompressFiles>` — 패킹 시 압축 (현재 결과: 약 7.26 MB).
+  - `<DeleteExtractedOnExit>false</DeleteExtractedOnExit>` — 가상 파일 시스템만 사용하므로 임시 추출 없음 (메모리 접근만 사용).
+  - `<ShareVirtualSystem>false</ShareVirtualSystem>` — 다른 프로세스에 가상 FS 공유 안 함.
+  - `<MapExecutableWithTemporaryFile>false</MapExecutableWithTemporaryFile>` — exe 자체는 임시 파일로 풀지 않음.
+- 실패해도 폴더/zip 결과물은 보존됨 (스크립트가 경고만 남기고 종료).
 
 ### 변경 포인트
 - **LÖVE 설치 경로**: `$LoveDir = "C:\Program Files\LOVE"`. 다른 위치에 설치되어 있으면 이 줄만 수정.
+- **Enigma Virtual Box 경로**: `$EnigmaDir = "C:\Program Files (x86)\Enigma Virtual Box"`. 다른 위치 설치 시 수정.
 - **포함 파일**: `$SourceFiles = @("main.lua", "hit.wav", "intro.png")`. 새 자산을 추가하면 이 배열에 등록.
-- 32bit/아이콘 변경/단일 파일 SFX는 미지원 — 필요 시 별도 작업.
+- DLL/txt 자동 수집: `$BuildDir`에서 `JustPingPong.exe`를 제외한 모든 파일이 자동으로 가상 패킹 대상이 되므로 새 런타임 DLL이 추가돼도 별도 등록 불필요.
+- 32bit/아이콘 변경은 미지원 — 필요 시 별도 작업.
 
 ## 개선 사항
 - [x] 랜덤 박스
