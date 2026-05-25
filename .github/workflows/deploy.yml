@@ -3,7 +3,7 @@ name: Deploy Love2D to GitHub Pages
 on:
   push:
     branches:
-      - main # 만약 기본 브랜치 이름이 master라면 master로 변경하세요.
+      - master # 만약 기본 브랜치 이름이 master라면 master로 변경하세요.
 
 permissions:
   contents: write
