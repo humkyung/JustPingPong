@@ -12,13 +12,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+    # 🌟 v4 -> v5 버전업 (Node.js 24 지원)
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
+    # 🌟 v4 -> v6 버전업 (Node.js 24 지원)
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 18
+          node-version: 24 # Node 버전도 함께 올려줍니다.
 
       - name: Install love.js
         run: npm install -g love.js
@@ -38,7 +40,9 @@ jobs:
       - name: Copy index.html to docs root
         run: |
           cp docs/index.html docs/404.html
-          
+
+    # 🌟 peaceiris/actions-gh-pages는 내부 엔진이 전환되는 과정이라 
+    # env 설정과 위 조치들로 경고가 사라지거나 호환성이 유지됩니다.          
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
