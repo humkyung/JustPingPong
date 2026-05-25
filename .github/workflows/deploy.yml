@@ -28,6 +28,12 @@ jobs:
 
       - name: Build web version
         run: love.js game.love docs --title "My Love2D Game" --memory 16777216
+        
+        # 🌟 이 단계를 새로 추가하거나, 기존 Copy 단계에 한 줄을 추가합니다.
+      - name: Bypass Jekyll (Create .nojekyll)
+        run: |
+          touch docs/.nojekyll
+          cp docs/index.html docs/404.html
 
       - name: Copy index.html to docs root
         run: |
