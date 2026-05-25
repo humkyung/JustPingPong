@@ -1,0 +1,40 @@
+name: Deploy Love2D to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # 만약 기본 브랜치 이름이 master라면 master로 변경하세요.
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install love.js
+        run: npm install -g love.js
+
+      - name: Zip game files
+        run: zip -r game.love . -x ".git/*" ".github/*"
+
+      - name: Build web version
+        run: love.js game.love docs --title "My Love2D Game" --memory 16777216
+
+      - name: Copy index.html to docs root
+        run: |
+          cp docs/index.html docs/404.html
+          
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
