@@ -3,24 +3,25 @@ name: Deploy Love2D to GitHub Pages
 on:
   push:
     branches:
-      - master # 만약 기본 브랜치 이름이 master라면 master로 변경하세요.
+      - main
 
 permissions:
   contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    # 🌟 v4 -> v5 버전업 (Node.js 24 지원)
       - name: Checkout code
         uses: actions/checkout@v5
 
-    # 🌟 v4 -> v6 버전업 (Node.js 24 지원)
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24 # Node 버전도 함께 올려줍니다.
+          node-version: 24
 
       - name: Install love.js
         run: npm install -g love.js
@@ -29,20 +30,19 @@ jobs:
         run: zip -r game.love . -x ".git/*" ".github/*"
 
       - name: Build web version
-        run: love.js game.love docs --title "My Love2D Game" --memory 16777216
-        
-        # 🌟 이 단계를 새로 추가하거나, 기존 Copy 단계에 한 줄을 추가합니다.
-      - name: Bypass Jekyll (Create .nojekyll)
+        run: love.js game.love docs --title "JustPingPong" --memory 16777216
+
+      # 🌟 [핵심] SharedArrayBuffer 에러를 해결하기 위한 보안 스크립트 삽입 단계
+      - name: Fix SharedArrayBuffer (coi-serviceworker)
         run: |
           touch docs/.nojekyll
           cp docs/index.html docs/404.html
-
-      - name: Copy index.html to docs root
-        run: |
-          cp docs/index.html docs/404.html
-
-    # 🌟 peaceiris/actions-gh-pages는 내부 엔진이 전환되는 과정이라 
-    # env 설정과 위 조치들로 경고가 사라지거나 호환성이 유지됩니다.          
+          # 1. coi-serviceworker 라이브러리를 다운로드하여 docs 폴더에 넣습니다.
+          curl -sL https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/master/coi-serviceworker.js -o docs/coi-serviceworker.js
+          # 2. index.html의 <head> 태그 바로 뒤에 해당 스크립트를 로드하는 코드를 강제로 삽입합니다.
+          sed -i 's|<head>|<head><script src="coi-serviceworker.js"></script>|g' docs/index.html
+          sed -i 's|<head>|<head><script src="coi-serviceworker.js"></script>|g' docs/404.html
+          
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
